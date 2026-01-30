@@ -11,31 +11,43 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 
 class PosController extends Controller
 {
-    /**
-     * POS (Kassa) ana ekranını yükləyir.
-     */
+    // 1. POS Ekranını açır
     public function index()
     {
-        return view('admin.pos.index');
+        // Kateqoriyalar və Məhsulları POS üçün yükləyirik
+        // Mağaza stoku > 0 olanları gətiririk
+        $products = Product::where('is_active', true)
+            ->with(['activeDiscount', 'batches' => function($q) {
+                // location sütunu mütləq olmalıdır (miqrasiya edilibsə)
+                $q->where('location', 'store')->where('current_quantity', '>', 0);
+            }])
+            ->latest()
+            ->get()
+            ->map(function($product) {
+                $product->store_stock = $product->batches->sum('current_quantity');
+                return $product;
+            });
+
+        return view('admin.pos.index', compact('products'));
     }
 
-    /**
-     * Məhsul axtarışı (Barkod oxuyucu və ya Ad ilə).
-     * AJAX vasitəsilə işləyir.
-     */
+    // 2. Məhsul Axtarışı (AJAX)
     public function search(Request $request)
     {
-        $query = $request->get('query');
+        $query = $request->get('q') ?? $request->get('query');
 
         if (!$query) {
             return response()->json([]);
         }
 
-        // Aktiv məhsulları və onlara aid kateqoriya/endirim məlumatlarını gətiririk
-        $products = Product::with(['category', 'activeDiscount'])
+        $products = Product::with(['category', 'activeDiscount', 'batches' => function($q) {
+                $q->where('location', 'store')->where('current_quantity', '>', 0);
+            }])
             ->where('is_active', true)
             ->where(function($q) use ($query) {
                 $q->where('name', 'like', "%{$query}%")
@@ -44,15 +56,13 @@ class PosController extends Controller
             ->take(10)
             ->get();
 
-        // Məlumatları front-end (Alpine.js) üçün formatlayırıq
         $results = $products->map(function($product) {
-            // Bütün partiyalar üzrə cəmi stok
+            // Yalnız mağaza stoku
             $stock = $product->batches->sum('current_quantity');
 
             $price = $product->selling_price;
             $discountAmount = 0;
 
-            // Əgər məhsulun aktiv kampaniyası varsa endirimi hesablayırıq
             if ($product->activeDiscount) {
                 $discount = $product->activeDiscount;
                 if ($discount->type == 'fixed') {
@@ -72,7 +82,7 @@ class PosController extends Controller
                 'price' => (float) $price,
                 'discount_amount' => (float) $discountAmount,
                 'final_price' => (float) $finalPrice,
-                'tax_rate' => 0, // Vergi tənzimləmələrə görə 0 və ya dinamik ola bilər
+                'tax_rate' => (float) $product->tax_rate,
                 'stock' => (int) $stock
             ];
         });
@@ -80,18 +90,13 @@ class PosController extends Controller
         return response()->json($results);
     }
 
-    /**
-     * Satışı tamamlayır (Checkout).
-     * Stokları azaldır, Order və OrderItem yaradır, Lotoreya kodu generasiya edir.
-     */
+    // 3. Satışı Tamamla (Checkout)
     public function store(Request $request)
     {
-        // Gələn məlumatların validasiyası
         $request->validate([
             'cart' => 'required|array|min:1',
             'payment_method' => 'required|in:cash,card',
             'paid_amount' => 'required|numeric|min:0',
-            'promo_code' => 'nullable|string',
         ]);
 
         try {
@@ -103,101 +108,134 @@ class PosController extends Controller
             $totalDiscount = 0;
             $grandTotal = 0;
 
-            // XƏTA HƏLLİ: Əgər kassir daxil olmayıbsa (Auth::id null), bazadakı ilk useri (admin) götürürük
-            $userId = Auth::id() ?? User::first()->id;
+            // --- İSTİFADƏÇİ XƏTASININ HƏLLİ ---
+            // 1. Giriş etmiş istifadəçini yoxla
+            $userId = Auth::id();
 
-            // UNİKAL LOTOREYA KODU YARADILMASI (Məs: RJ-AB12-9876)
-            $lotteryCode = 'RJ-' . strtoupper(Str::random(4)) . '-' . rand(1000, 9999);
+            // 2. Yoxdursa, bazadakı ilk istifadəçini götür
+            if (!$userId) {
+                $firstUser = User::first();
+                if ($firstUser) {
+                    $userId = $firstUser->id;
+                } else {
+                    // 3. Baza boşdursa, Avtomatik "Admin" istifadəçisi yarat
+                    // Bu hissə "Attempt to read property 'id' on null" xətasını həll edir
+                    $newUser = User::create([
+                        'name' => 'Admin',
+                        'email' => 'admin@system.local', // Dummy email
+                        'password' => Hash::make('admin123'), // Dummy şifrə
+                        // 'role' => 'admin' // Əgər role sütunu varsa, aktivləşdirin
+                    ]);
+                    $userId = $newUser->id;
+                }
+            }
 
-            // 1. Order (Satış başlığı) yaradılır
+            // Lotoreya kodunu modeldəki statik funksiya ilə yaradırıq (əgər varsa)
+            $lotteryCode = method_exists(Order::class, 'generateUniqueLotteryCode')
+                            ? Order::generateUniqueLotteryCode()
+                            : (string) rand(1000, 9999);
+
             $order = Order::create([
                 'user_id' => $userId,
                 'receipt_code' => strtoupper(Str::random(8)),
                 'lottery_code' => $lotteryCode,
-                'subtotal' => 0, // Aşağıda hesablanıb update ediləcək
+                'subtotal' => 0,
                 'total_discount' => 0,
                 'total_tax' => 0,
                 'grand_total' => 0,
                 'total_cost' => 0,
-                'paid_amount' => $request->paid_amount,
+                'paid_amount' => $request->paid_amount ?? $request->received_amount,
                 'payment_method' => $request->payment_method,
                 'status' => 'completed'
             ]);
 
-            // 2. Səbətdəki məhsulları dövr edirik və stokdan çıxarırıq (FIFO)
             foreach ($request->cart as $item) {
+                // lockForUpdate ilə məhsulu kilidləyirik
                 $product = Product::lockForUpdate()->findOrFail($item['id']);
                 $qtyNeeded = $item['qty'];
-                $productTotalCost = 0;
 
-                // --- FIFO STOK SİSTEMİ ---
-                // Ən köhnə partiyadan başlayaraq stoku azaldırıq
-                $batches = ProductBatch::where('product_id', $product->id)
-                            ->where('current_quantity', '>', 0)
-                            ->orderBy('created_at', 'asc')
-                            ->lockForUpdate()
-                            ->get();
+                // Hədiyyə olub-olmadığını yoxlayırıq
+                $isGift = isset($item['is_gift']) && $item['is_gift'] == true;
 
-                $remainingQty = $qtyNeeded;
+                // --- MAĞAZA STOKUNDAN SİLMƏ (FIFO) ---
+                $deductionResult = $this->deductFromStoreStock($product, $qtyNeeded);
+                $productTotalCost = $deductionResult['total_cost'];
 
-                foreach ($batches as $batch) {
-                    if ($remainingQty <= 0) break;
-
-                    $take = min($remainingQty, $batch->current_quantity);
-                    $batch->decrement('current_quantity', $take);
-
-                    // Maya dəyərini hesablayırıq (Mənfəət analizi üçün)
-                    $productTotalCost += ($take * $batch->cost_price);
-                    $remainingQty -= $take;
-                }
-
-                // Satış qiyməti və Endirim yoxlanışı
-                $price = $product->selling_price;
+                // Maliyyə Hesablamaları
+                $originalPrice = $product->selling_price;
                 $discountAmount = 0;
+                $taxAmount = 0;
+                $lineTotal = 0;
+                $currentTaxRate = $product->tax_rate ?? 0;
 
-                if ($product->activeDiscount) {
-                    $d = $product->activeDiscount;
-                    $discountAmount = ($d->type == 'fixed') ? $d->value : ($price * $d->value / 100);
+                // Potensial Vergi İtkisi
+                $potentialTaxLoss = ($originalPrice * $currentTaxRate / 100) * $qtyNeeded;
+
+                if ($isGift) {
+                    // --- HƏDİYYƏ MƏNTİQİ ---
+                    $price = 0;
+                    $lineTotal = 0;
+                    $discountAmount = 0;
+                    $taxAmount = 0;
+
+                    // Hesabat xərci: Maya + Vergi İtkisi
+                    $itemCostForReport = $productTotalCost + $potentialTaxLoss;
+
+                } else {
+                    // --- NORMAL SATIŞ ---
+                    $price = $originalPrice;
+
+                    if ($product->activeDiscount) {
+                        $d = $product->activeDiscount;
+                        $discountAmount = ($d->type == 'fixed') ? $d->value : ($price * $d->value / 100);
+                    }
+
+                    // Vergi hesabı
+                    $taxableAmount = ($price - $discountAmount) * $qtyNeeded;
+                    $taxAmount = $taxableAmount * ($currentTaxRate / 100);
+
+                    $lineTotal = ($price * $qtyNeeded) - ($discountAmount * $qtyNeeded) + $taxAmount;
+
+                    // Normal satışda xərc = Maya Dəyəri
+                    $itemCostForReport = $productTotalCost;
                 }
 
-                $taxAmount = 0; // Hazırda 0, ehtiyac olarsa tax_rate sütunundan hesablana bilər
-                $lineTotal = ($price - $discountAmount + $taxAmount) * $qtyNeeded;
-
-                // Satılan məhsulun detalları (OrderItem) yaradılır
                 OrderItem::create([
                     'order_id' => $order->id,
                     'product_id' => $product->id,
                     'product_name' => $product->name,
                     'product_barcode' => $product->barcode,
                     'quantity' => $qtyNeeded,
+                    'is_gift' => $isGift ?? false,
                     'price' => $price,
-                    'cost' => ($qtyNeeded > 0) ? ($productTotalCost / $qtyNeeded) : 0, // Orta maya
-                    'tax_amount' => $taxAmount * $qtyNeeded,
+                    'cost' => ($qtyNeeded > 0) ? ($productTotalCost / $qtyNeeded) : 0,
+                    'tax_amount' => $taxAmount,
                     'discount_amount' => $discountAmount * $qtyNeeded,
                     'total' => $lineTotal
                 ]);
 
-                // Ümumi satış rəqəmlərini toplayırıq
+                // Ümumi Cəmlər
                 $subtotal += ($price * $qtyNeeded);
                 $totalDiscount += ($discountAmount * $qtyNeeded);
-                $totalTax += ($taxAmount * $qtyNeeded);
+                $totalTax += $taxAmount;
                 $grandTotal += $lineTotal;
-                $totalCost += $productTotalCost;
+
+                $totalCost += $itemCostForReport;
             }
 
-            // 3. Order-i yekun hesablanmış məbləğlərlə yeniləyirik
+            $paidAmount = $request->paid_amount ?? $request->received_amount;
+
             $order->update([
                 'subtotal' => $subtotal,
                 'total_discount' => $totalDiscount,
                 'total_tax' => $totalTax,
                 'grand_total' => $grandTotal,
                 'total_cost' => $totalCost,
-                'change_amount' => $request->paid_amount - $grandTotal // Qalıq (Sdat)
+                'change_amount' => $paidAmount - $grandTotal
             ]);
 
             DB::commit();
 
-            // Uğurlu cavab və çap üçün lazım olan məlumatlar geri göndərilir
             return response()->json([
                 'success' => true,
                 'message' => 'Satış uğurla tamamlandı!',
@@ -208,10 +246,50 @@ class PosController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
+            Log::error('POS Error: ' . $e->getMessage());
             return response()->json([
                 'success' => false,
                 'message' => 'Xəta baş verdi: ' . $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Mağaza Stokundan Silmə Funksiyası (FIFO)
+     */
+    private function deductFromStoreStock($product, $qtyNeeded)
+    {
+        // 1. Yalnız MAĞAZA ('store') partiyalarını gətir
+        $batches = ProductBatch::where('product_id', $product->id)
+            ->where('location', 'store')
+            ->where('current_quantity', '>', 0)
+            ->orderBy('expiration_date', 'asc')
+            ->orderBy('created_at', 'asc')
+            ->lockForUpdate()
+            ->get();
+
+        $remainingQty = $qtyNeeded;
+        $totalDeductedCost = 0;
+
+        // Mağazada ümumi stok yoxlanışı
+        $totalInStore = $batches->sum('current_quantity');
+
+        if ($totalInStore < $qtyNeeded) {
+            throw new \Exception("Mağazada '{$product->name}' məhsulundan kifayət qədər yoxdur! (Tələb: $qtyNeeded, Var: $totalInStore). Zəhmət olmasa Anbardan Transfer edin.");
+        }
+
+        foreach ($batches as $batch) {
+            if ($remainingQty <= 0) break;
+
+            $take = min($remainingQty, $batch->current_quantity);
+
+            $totalDeductedCost += ($take * $batch->cost_price);
+
+            $batch->decrement('current_quantity', $take);
+
+            $remainingQty -= $take;
+        }
+
+        return ['total_cost' => $totalDeductedCost];
     }
 }

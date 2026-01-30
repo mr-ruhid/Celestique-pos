@@ -1,73 +1,96 @@
 @extends('layouts.admin')
 
 @section('content')
-    <!-- Səhifə Başlığı -->
+    <!-- Başlıq və Sync Düyməsi -->
     <div class="flex justify-between items-center mb-6">
-        <h1 class="text-2xl font-semibold text-gray-800">İdarəetmə Paneli</h1>
+        <div>
+            <h1 class="text-2xl font-bold text-gray-800">İdarəetmə Paneli</h1>
+            <div class="flex items-center mt-1">
+                @if($systemMode == 'server')
+                    <span class="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-0.5 rounded border border-blue-200">
+                        <i class="fa-solid fa-server mr-1"></i> SERVER REJİMİ
+                    </span>
+                @elseif($systemMode == 'client')
+                    <span class="bg-green-100 text-green-800 text-xs font-bold px-2.5 py-0.5 rounded border border-green-200">
+                        <i class="fa-solid fa-store mr-1"></i> MAĞAZA REJİMİ
+                    </span>
+                @else
+                    <span class="bg-gray-100 text-gray-800 text-xs font-bold px-2.5 py-0.5 rounded border border-gray-200">
+                        LOKAL REJİM
+                    </span>
+                @endif
+                <span class="text-gray-500 text-sm ml-2">{{ date('d F Y') }}</span>
+            </div>
+        </div>
+
         <div class="flex space-x-2">
-            <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition duration-150 ease-in-out">
-                <i class="fa-solid fa-plus mr-2"></i> Yeni Satış
-            </button>
+            @if($systemMode == 'client')
+                <form action="{{ route('dashboard.sync') }}" method="POST">
+                    @csrf
+                    <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center">
+                        <i class="fa-solid fa-rotate mr-2"></i> Sinxronizasiya Et
+                    </button>
+                </form>
+            @endif
+
+            <a href="{{ route('pos.index') }}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition shadow-sm flex items-center">
+                <i class="fa-solid fa-cash-register mr-2"></i> Kassaya Keç
+            </a>
         </div>
     </div>
 
-    <!-- Statistik Kartlar (Yuxarı hissə) -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+    <!-- Bildirişlər -->
+    @if(session('success'))
+        <div class="bg-green-50 border-l-4 border-green-500 text-green-700 p-4 mb-6 rounded shadow-sm whitespace-pre-line">
+            {{ session('success') }}
+        </div>
+    @endif
+
+    @if(session('error'))
+        <div class="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded shadow-sm">
+            {{ session('error') }}
+        </div>
+    @endif
+
+    <!-- Statistik Kartlar -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
 
         <!-- Kart 1: Günlük Satış -->
-        <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
-            <div class="flex justify-between items-start">
-                <div>
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Bugünkü Satış</p>
-                    <h3 class="text-2xl font-bold text-gray-800 mt-1">1,250.00 ₼</h3>
-                </div>
-                <div class="p-2 bg-green-100 rounded-lg">
-                    <i class="fa-solid fa-sack-dollar text-green-600 text-xl"></i>
-                </div>
-            </div>
-            <p class="text-sm text-green-600 mt-4 flex items-center">
-                <i class="fa-solid fa-arrow-trend-up mr-1"></i> +15% dünənə görə
-            </p>
-        </div>
-
-        <!-- Kart 2: Satış Sayı (Orders) -->
         <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-blue-500">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Çek Sayı</p>
-                    <h3 class="text-2xl font-bold text-gray-800 mt-1">45</h3>
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Bugünkü Satış</p>
+                    <h3 class="text-2xl font-bold text-gray-800 mt-1">{{ number_format($totalSalesToday, 2) }} ₼</h3>
                 </div>
-                <div class="p-2 bg-blue-100 rounded-lg">
-                    <i class="fa-solid fa-receipt text-blue-600 text-xl"></i>
+                <div class="p-2 bg-blue-50 rounded-lg">
+                    <i class="fa-solid fa-sack-dollar text-blue-600 text-xl"></i>
                 </div>
             </div>
-            <p class="text-sm text-gray-500 mt-4">Son 1 saatda: 12 satış</p>
+            <p class="text-sm text-gray-500 mt-4">{{ $totalOrdersToday }} çek</p>
         </div>
 
-        <!-- Kart 3: Müştərilər -->
-        <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-purple-500">
+        <!-- Kart 2: Təxmini Mənfəət -->
+        <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-green-500">
             <div class="flex justify-between items-start">
                 <div>
-                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Müştərilər</p>
-                    <h3 class="text-2xl font-bold text-gray-800 mt-1">892</h3>
+                    <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Bugünkü Mənfəət</p>
+                    <h3 class="text-2xl font-bold text-gray-800 mt-1">{{ number_format($totalProfitToday, 2) }} ₼</h3>
                 </div>
-                <div class="p-2 bg-purple-100 rounded-lg">
-                    <i class="fa-solid fa-users text-purple-600 text-xl"></i>
+                <div class="p-2 bg-green-50 rounded-lg">
+                    <i class="fa-solid fa-chart-line text-green-600 text-xl"></i>
                 </div>
             </div>
-            <p class="text-sm text-purple-600 mt-4 flex items-center">
-                <i class="fa-solid fa-user-plus mr-1"></i> +5 yeni bu gün
-            </p>
+            <p class="text-xs text-gray-400 mt-4">Satış - (Maya + Vergi + Komissiya)</p>
         </div>
 
-        <!-- Kart 4: Kritik Stok (Xəbərdarlıq) -->
+        <!-- Kart 3: Kritik Stok -->
         <div class="bg-white rounded-xl shadow-sm p-6 border-l-4 border-red-500">
             <div class="flex justify-between items-start">
                 <div>
                     <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Kritik Stok</p>
-                    <h3 class="text-2xl font-bold text-red-600 mt-1">12</h3>
+                    <h3 class="text-2xl font-bold text-red-600 mt-1">{{ $lowStockProducts->count() }}</h3>
                 </div>
-                <div class="p-2 bg-red-100 rounded-lg">
+                <div class="p-2 bg-red-50 rounded-lg">
                     <i class="fa-solid fa-triangle-exclamation text-red-600 text-xl"></i>
                 </div>
             </div>
@@ -75,69 +98,70 @@
         </div>
     </div>
 
-    <!-- Cədvəl Hissəsi (Son Satışlar) -->
-    <div class="bg-white shadow-lg rounded-xl overflow-hidden border border-gray-100">
-        <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
-            <h2 class="text-lg font-semibold text-gray-800">Son Satış Əməliyyatları</h2>
-            <a href="#" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Hamısına bax</a>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        <!-- Son Satışlar -->
+        <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h2 class="font-bold text-gray-800">Son Satışlar</h2>
+                <a href="{{ route('sales.index') }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Hamsı</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <tbody class="divide-y divide-gray-100 text-sm">
+                        @forelse($recentOrders as $order)
+                        <tr class="hover:bg-gray-50 transition">
+                            <td class="px-6 py-3 font-medium text-gray-900">#{{ $order->receipt_code }}</td>
+                            <td class="px-6 py-3 text-gray-500">{{ $order->created_at->format('H:i') }}</td>
+                            <td class="px-6 py-3 font-bold text-gray-800 text-right">{{ number_format($order->grand_total, 2) }} ₼</td>
+                            <td class="px-6 py-3 text-right">
+                                <a href="{{ route('sales.show', $order->id) }}" class="text-gray-400 hover:text-blue-600"><i class="fa-solid fa-eye"></i></a>
+                            </td>
+                        </tr>
+                        @empty
+                        <tr>
+                            <td colspan="4" class="px-6 py-8 text-center text-gray-400">Bu gün satış olmayıb</td>
+                        </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
-                <thead>
-                    <tr class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wider">
-                        <th class="px-6 py-3 font-semibold">Çek No</th>
-                        <th class="px-6 py-3 font-semibold">Müştəri</th>
-                        <th class="px-6 py-3 font-semibold">Tarix</th>
-                        <th class="px-6 py-3 font-semibold">Məbləğ</th>
-                        <th class="px-6 py-3 font-semibold">Status</th>
-                        <th class="px-6 py-3 font-semibold text-right">Əməliyyat</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-100 text-sm">
-                    <!-- Nümunə Sətir 1 -->
-                    <tr class="hover:bg-gray-50 transition">
-                        <td class="px-6 py-4 font-medium text-gray-900">#TRX-9823</td>
-                        <td class="px-6 py-4 text-gray-600">Nəğd Satış</td>
-                        <td class="px-6 py-4 text-gray-500">Bu gün, 14:30</td>
-                        <td class="px-6 py-4 font-bold text-gray-800">24.50 ₼</td>
-                        <td class="px-6 py-4">
-                            <span class="px-2 py-1 text-xs font-semibold text-green-700 bg-green-100 rounded-full">Tamamlandı</span>
-                        </td>
-                        <td class="px-6 py-4 text-right">
-                            <button class="text-gray-400 hover:text-blue-600"><i class="fa-solid fa-eye"></i></button>
-                        </td>
-                    </tr>
-
-                    <!-- Nümunə Sətir 2 -->
-                    <tr class="hover:bg-gray-50 transition">
-                        <td class="px-6 py-4 font-medium text-gray-900">#TRX-9822</td>
-                        <td class="px-6 py-4 text-gray-600">Elvin Məmmədov</td>
-                        <td class="px-6 py-4 text-gray-500">Bu gün, 14:15</td>
-                        <td class="px-6 py-4 font-bold text-gray-800">105.00 ₼</td>
-                        <td class="px-6 py-4">
-                            <span class="px-2 py-1 text-xs font-semibold text-green-700 bg-green-100 rounded-full">Tamamlandı</span>
-                        </td>
-                        <td class="px-6 py-4 text-right">
-                            <button class="text-gray-400 hover:text-blue-600"><i class="fa-solid fa-eye"></i></button>
-                        </td>
-                    </tr>
-
-                    <!-- Nümunə Sətir 3 -->
-                    <tr class="hover:bg-gray-50 transition">
-                        <td class="px-6 py-4 font-medium text-gray-900">#TRX-9821</td>
-                        <td class="px-6 py-4 text-gray-600">Nəğd Satış</td>
-                        <td class="px-6 py-4 text-gray-500">Bu gün, 13:45</td>
-                        <td class="px-6 py-4 font-bold text-gray-800">8.20 ₼</td>
-                        <td class="px-6 py-4">
-                            <span class="px-2 py-1 text-xs font-semibold text-red-700 bg-red-100 rounded-full">Ləğv edildi</span>
-                        </td>
-                        <td class="px-6 py-4 text-right">
-                            <button class="text-gray-400 hover:text-blue-600"><i class="fa-solid fa-eye"></i></button>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
+        <!-- Kritik Stok Cədvəli -->
+        <div class="bg-white shadow-sm rounded-xl overflow-hidden border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <h2 class="font-bold text-gray-800">Bitmək Üzrə Olanlar</h2>
+                <a href="{{ route('stocks.market') }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium">Stoka Bax</a>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left">
+                    <tbody class="divide-y divide-gray-100 text-sm">
+                        @forelse($lowStockProducts as $product)
+                        <tr class="hover:bg-red-50 transition">
+                            <td class="px-6 py-3">
+                                <p class="font-medium text-gray-900">{{ $product->name }}</p>
+                                <p class="text-xs text-gray-500">{{ $product->barcode }}</p>
+                            </td>
+                            <td class="px-6 py-3 text-center">
+                                <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold">{{ $product->total_stock }} əd</span>
+                            </td>
+                            <td class="px-6 py-3 text-right">
+                                <a href="{{ route('stocks.create') }}" class="text-green-600 hover:underline text-xs font-bold">Artır +</a>
+                            </td>
+                        </tr>
+                        @empty
+                        <tr>
+                            <td colspan="3" class="px-6 py-8 text-center text-green-600">
+                                <i class="fa-solid fa-check-circle text-2xl mb-2"></i>
+                                <p>Stok vəziyyəti əladır!</p>
+                            </td>
+                        </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
         </div>
+
     </div>
 @endsection

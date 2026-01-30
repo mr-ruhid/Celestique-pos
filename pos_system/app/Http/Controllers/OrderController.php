@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Order;
-use App\Models\Setting; // Tənzimləmələr modelini əlavə edirik
+use App\Models\Setting;
 use Illuminate\Http\Request;
 
 class OrderController extends Controller
@@ -12,23 +12,31 @@ class OrderController extends Controller
     public function index()
     {
         // Satışları ən sondan əvvələ doğru gətiririk
-        // 'user' əlaqəsi ilə kassiri, 'items' ilə məhsul sayını biləcəyik
         $orders = Order::with(['user', 'items'])->latest()->paginate(20);
 
         return view('admin.sales.index', compact('orders'));
     }
 
-    // Satışın Detalları (Çek Görüntüsü)
-    // DÜZƏLİŞ: Birbaşa Model Binding (Order $order) istifadə edirik
+    // Satışın Detalları (Çek Görüntüsü - Ekranda baxmaq üçün)
     public function show(Order $order)
     {
-        // Əlaqəli məlumatları (Kassir və Məhsullar) yükləyirik
         $order->load(['user', 'items']);
 
-        // Mağaza məlumatlarını (Ad, Ünvan, Telefon) bazadan çəkirik
-        // "key => value" formatında array kimi alırıq ki, view-da rahat işlədək
+        // Mağaza məlumatlarını bazadan çəkirik
         $settings = Setting::pluck('value', 'key')->toArray();
 
         return view('admin.sales.show', compact('order', 'settings'));
+    }
+
+    // Rəsmi Çek Çapı (Avtomatik açılan pəncərə üçün) - BU METOD ƏLAVƏ EDİLDİ
+    public function printOfficial(Order $order)
+    {
+        $order->load(['user', 'items']);
+
+        // Tənzimləmələri çəkirik
+        $settings = Setting::pluck('value', 'key')->toArray();
+
+        // Rəsmi qəbz şablonunu qaytarır
+        return view('admin.sales.receipt_official', compact('order', 'settings'));
     }
 }

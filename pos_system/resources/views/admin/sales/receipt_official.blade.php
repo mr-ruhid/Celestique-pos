@@ -8,14 +8,14 @@
             margin: 0;
         }
         body {
-            font-family: 'Courier New', Courier, monospace; /* Çek stili üçün monospace font */
+            font-family: 'Courier New', Courier, monospace;
             font-size: 12px;
             line-height: 1.4;
             color: #000;
             background: #fff;
             margin: 0;
-            padding: 20px;
-            width: 80mm; /* Standart termal kağız eni */
+            padding: 10px;
+            width: 80mm;
         }
         .container {
             width: 100%;
@@ -58,22 +58,32 @@
         .totals-table td {
             padding: 1px 0;
         }
+
+        /* Lotoreya Kodu Dizaynı */
         .lottery-box {
             border: 2px solid #000;
             margin: 15px 0;
             padding: 10px;
             text-align: center;
+            background-color: #f8f8f8;
         }
         .lottery-title {
-            font-size: 10px;
+            font-size: 11px;
             font-weight: bold;
+            text-transform: uppercase;
             margin-bottom: 5px;
+            border-bottom: 1px solid #000;
+            display: inline-block;
+            padding-bottom: 2px;
         }
         .lottery-code {
-            font-size: 18px;
-            font-weight: bold;
+            font-size: 20px;
+            font-weight: 900;
             letter-spacing: 2px;
+            font-family: sans-serif;
+            margin: 5px 0;
         }
+
         .fiscal-info {
             font-size: 10px;
             margin-top: 10px;
@@ -87,6 +97,7 @@
         @media print {
             .no-print { display: none; }
             body { padding: 0; margin: 0; }
+            .lottery-box { background-color: transparent; }
         }
     </style>
 </head>
@@ -104,25 +115,25 @@
             <div class="store-name">{{ $settings['store_name'] ?? 'RJ POS MARKET' }}</div>
             <div>{{ $settings['store_address'] ?? 'Bakı şəhəri' }}</div>
             <div>Tel: {{ $settings['store_phone'] ?? '+994 XX XXX XX XX' }}</div>
-            <div class="font-bold">VÖEN: 1234567890</div>
-            <div>Obyekt kodu: 000000</div>
+            <div class="font-bold">VÖEN: {{ $settings['store_voen'] ?? '1234567890' }}</div>
+            <div>Obyekt kodu: {{ $settings['object_code'] ?? '000000' }}</div>
         </div>
 
         <div class="dashed-line"></div>
 
         <div class="text-center">
-            <div class="title">SATIŞ ÇEKİ</div>
-            <div>Çek nömrəsi: #{{ $order->receipt_code }}</div>
+            <div class="title">{{ $settings['receipt_header'] ?? 'SATIŞ ÇEKİ' }}</div>
+            <div>Çek №: #{{ $order->receipt_code }}</div>
         </div>
 
         <div style="margin-top: 10px;">
             <table style="font-size: 11px;">
                 <tr>
-                    <td>Kassa №: 01</td>
+                    <td>Kassa №: {{ $order->cashRegister?->code ?? '01' }}</td>
                     <td class="text-right">Tarix: {{ $order->created_at->format('d.m.Y') }}</td>
                 </tr>
                 <tr>
-                    <td>Kassir: {{ $order->user->name ?? 'Admin' }}</td>
+                    <td>Kassir: {{ $order->user?->name ?? 'Admin' }}</td>
                     <td class="text-right">Saat: {{ $order->created_at->format('H:i:s') }}</td>
                 </tr>
             </table>
@@ -134,18 +145,20 @@
         <table>
             <thead>
                 <tr>
-                    <th style="width: 50%;">Malın adı</th>
-                    <th class="text-center">Miqdar</th>
+                    <th style="width: 45%;">Malın adı</th>
+                    <th class="text-center">Miq</th>
                     <th class="text-right">Qiymət</th>
-                    <th class="text-right">Toplam</th>
+                    <th class="text-right">Cəm</th>
                 </tr>
             </thead>
             <tbody>
                 @foreach($order->items as $item)
                 <tr>
                     <td>
-                        {{ $item->product_name }}<br>
-                        <small>*ƏDV-dən azad</small>
+                        {{ $item->product_name }}
+                        @if($item->discount_amount > 0)
+                            <br><small style="font-size:9px">Endirim: -{{ number_format($item->discount_amount, 2) }}</small>
+                        @endif
                     </td>
                     <td class="text-center">{{ $item->quantity }}</td>
                     <td class="text-right">{{ number_format($item->price, 2) }}</td>
@@ -167,6 +180,12 @@
             <tr>
                 <td>ENDİRİM:</td>
                 <td class="text-right">-{{ number_format($order->total_discount, 2) }}</td>
+            </tr>
+            @endif
+            @if($order->total_tax > 0)
+            <tr>
+                <td>ƏDV (18%):</td>
+                <td class="text-right">{{ number_format($order->total_tax, 2) }}</td>
             </tr>
             @endif
             <tr>
@@ -195,18 +214,19 @@
             @endif
         </table>
 
-        <!-- LOTOREYA KODU (Random Key) -->
+        <!-- LOTOREYA KODU -->
+        @if($order->lottery_code)
         <div class="lottery-box">
             <div class="lottery-title">UDUŞLU LOTOREYA KODU</div>
             <div class="lottery-code">{{ $order->lottery_code }}</div>
-            <div style="font-size: 9px; margin-top: 3px;">Kodu qeydiyyatdan keçirərək qalib olun!</div>
+            <div style="font-size: 9px; margin-top: 3px;">Kodu uduş kampaniyası üçün saxlayın!</div>
         </div>
+        @endif
 
         <!-- Fiskal Məlumatlar -->
         <div class="fiscal-info">
-            <div>Gün ərzində vurulmuş çek: {{ $order->id % 1000 }}</div>
-            <div>Kassa aparatı modeli: RJ-TECH V2</div>
-            <div>Kassa aparatı zavod nömrəsi: RJ{{ date('Y') }}9988</div>
+            {{-- XƏTA DÜZƏLİŞİ: UUID üçün crc32 --}}
+            <div>Gün ərzində vurulmuş çek: {{ abs(crc32($order->id)) % 1000 }}</div>
             <div class="font-bold">Fiscal ID: {{ strtoupper(substr(md5($order->id), 0, 12)) }}</div>
             <div>NMQ-nun qeydiyyat nömrəsi: 12345678</div>
         </div>
@@ -215,10 +235,10 @@
 
         <div class="text-center" style="margin-top: 10px;">
             {{ $settings['receipt_footer'] ?? 'Bizi seçdiyiniz üçün təşəkkür edirik!' }}<br>
-            <small>www.rj-pos.az</small>
+            <small>Software by RJ POS</small>
         </div>
 
-        <div style="height: 30px;"></div> <!-- Çapdan sonra asan qoparmaq üçün boşluq -->
+        <div style="height: 30px;"></div>
     </div>
 
 </body>
