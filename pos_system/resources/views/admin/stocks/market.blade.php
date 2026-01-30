@@ -52,12 +52,10 @@
                     </tr>
                 </thead>
 
-                {{-- Hər məhsul üçün ayrı tbody --}}
                 @forelse($products as $product)
                     @php
-                        // Mağazadakı partiyaların cəmi (Controller artıq filter edib göndərir)
+                        // Mağazadakı partiyaların cəmi (Controller filter edib)
                         $storeQty = $product->batches->sum('current_quantity');
-                        // Kritik səviyyə yoxlanışı
                         $isCritical = $storeQty <= $product->alert_limit;
                         $isOutOfStock = $storeQty == 0;
                     @endphp
@@ -116,7 +114,7 @@
                                 @endif
                             </td>
 
-                            <!-- Limit Dəyişmə Forması (Click propagation dayandırılır) -->
+                            <!-- Limit Dəyişmə Forması -->
                             <td class="px-6 py-4" @click.stop>
                                 <form action="{{ route('products.update_alert', $product->id) }}" method="POST" class="flex items-center">
                                     @csrf
@@ -159,8 +157,6 @@
                                                         <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ $variantName }}</td>
                                                         <td class="px-3 py-2 text-right font-medium text-gray-700">{{ number_format($batch->cost_price, 2) }} ₼</td>
                                                         <td class="px-3 py-2 text-center font-bold text-gray-800">{{ $batch->current_quantity }}</td>
-
-                                                        <!-- Stok Düzəliş -->
                                                         <td class="px-3 py-2 text-center">
                                                             <a href="{{ route('stocks.edit', $batch->id) }}" class="text-blue-600 hover:text-blue-800 transition p-1" title="Stoku Düzəlt">
                                                                 <i class="fa-solid fa-pen-to-square"></i>

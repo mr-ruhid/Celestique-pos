@@ -19,11 +19,8 @@ class PosController extends Controller
     // 1. POS Ekranını açır
     public function index()
     {
-        // Kateqoriyalar və Məhsulları POS üçün yükləyirik
-        // Mağaza stoku > 0 olanları gətiririk
         $products = Product::where('is_active', true)
             ->with(['activeDiscount', 'batches' => function($q) {
-                // location sütunu mütləq olmalıdır (miqrasiya edilibsə)
                 $q->where('location', 'store')->where('current_quantity', '>', 0);
             }])
             ->latest()
@@ -36,7 +33,7 @@ class PosController extends Controller
         return view('admin.pos.index', compact('products'));
     }
 
-    // 2. Məhsul Axtarışı (AJAX)
+    // 2. Məhsul Axtarışı
     public function search(Request $request)
     {
         $query = $request->get('q') ?? $request->get('query');
@@ -57,10 +54,8 @@ class PosController extends Controller
             ->get();
 
         $results = $products->map(function($product) {
-            // Yalnız mağaza stoku
             $stock = $product->batches->sum('current_quantity');
-
-            $price = $product->selling_price;
+            $price = (float) $product->selling_price;
             $discountAmount = 0;
 
             if ($product->activeDiscount) {
@@ -79,10 +74,10 @@ class PosController extends Controller
                 'name' => $product->name,
                 'barcode' => $product->barcode,
                 'image' => $product->image ? asset('storage/' . $product->image) : null,
-                'price' => (float) $price,
+                'price' => $price,
                 'discount_amount' => (float) $discountAmount,
                 'final_price' => (float) $finalPrice,
-                'tax_rate' => (float) $product->tax_rate,
+                'tax_rate' => (float) ($product->tax_rate ?? 0),
                 'stock' => (int) $stock
             ];
         });
@@ -90,12 +85,12 @@ class PosController extends Controller
         return response()->json($results);
     }
 
-    // 3. Satışı Tamamla (Checkout)
+    // 3. Satışı Tamamla
     public function store(Request $request)
     {
         $request->validate([
             'cart' => 'required|array|min:1',
-            'payment_method' => 'required|in:cash,card',
+            'payment_method' => 'required|in:cash,card,bonus',
             'paid_amount' => 'required|numeric|min:0',
         ]);
 
@@ -108,29 +103,17 @@ class PosController extends Controller
             $totalDiscount = 0;
             $grandTotal = 0;
 
-            // --- İSTİFADƏÇİ XƏTASININ HƏLLİ ---
-            // 1. Giriş etmiş istifadəçini yoxla
+            // İstifadəçi təyini
             $userId = Auth::id();
-
-            // 2. Yoxdursa, bazadakı ilk istifadəçini götür
             if (!$userId) {
                 $firstUser = User::first();
-                if ($firstUser) {
-                    $userId = $firstUser->id;
-                } else {
-                    // 3. Baza boşdursa, Avtomatik "Admin" istifadəçisi yarat
-                    // Bu hissə "Attempt to read property 'id' on null" xətasını həll edir
-                    $newUser = User::create([
-                        'name' => 'Admin',
-                        'email' => 'admin@system.local', // Dummy email
-                        'password' => Hash::make('admin123'), // Dummy şifrə
-                        // 'role' => 'admin' // Əgər role sütunu varsa, aktivləşdirin
-                    ]);
-                    $userId = $newUser->id;
-                }
+                $userId = $firstUser ? $firstUser->id : User::create([
+                    'name' => 'Admin',
+                    'email' => 'admin@system.local',
+                    'password' => Hash::make('admin123')
+                ])->id;
             }
 
-            // Lotoreya kodunu modeldəki statik funksiya ilə yaradırıq (əgər varsa)
             $lotteryCode = method_exists(Order::class, 'generateUniqueLotteryCode')
                             ? Order::generateUniqueLotteryCode()
                             : (string) rand(1000, 9999);
@@ -150,53 +133,59 @@ class PosController extends Controller
             ]);
 
             foreach ($request->cart as $item) {
-                // lockForUpdate ilə məhsulu kilidləyirik
                 $product = Product::lockForUpdate()->findOrFail($item['id']);
                 $qtyNeeded = $item['qty'];
 
-                // Hədiyyə olub-olmadığını yoxlayırıq
-                $isGift = isset($item['is_gift']) && $item['is_gift'] == true;
+                // DÜZƏLİŞ: Hədiyyə dəyərinin düzgün oxunması (String "false" problemi həlli)
+                $isGiftRaw = $item['is_gift'] ?? false;
+                $isGift = filter_var($isGiftRaw, FILTER_VALIDATE_BOOLEAN);
 
-                // --- MAĞAZA STOKUNDAN SİLMƏ (FIFO) ---
+                // Stokdan silmə
                 $deductionResult = $this->deductFromStoreStock($product, $qtyNeeded);
                 $productTotalCost = $deductionResult['total_cost'];
 
-                // Maliyyə Hesablamaları
-                $originalPrice = $product->selling_price;
+                // Qiymət və Vergi Parametrləri
+                $originalPrice = (float) $product->selling_price;
+                $currentTaxRate = (float) ($product->tax_rate ?? 0);
+
                 $discountAmount = 0;
                 $taxAmount = 0;
                 $lineTotal = 0;
-                $currentTaxRate = $product->tax_rate ?? 0;
-
-                // Potensial Vergi İtkisi
-                $potentialTaxLoss = ($originalPrice * $currentTaxRate / 100) * $qtyNeeded;
 
                 if ($isGift) {
-                    // --- HƏDİYYƏ MƏNTİQİ ---
+                    // Hədiyyə: Qiymət 0, Vergi 0
                     $price = 0;
                     $lineTotal = 0;
-                    $discountAmount = 0;
-                    $taxAmount = 0;
 
-                    // Hesabat xərci: Maya + Vergi İtkisi
+                    // Hesabatda Ziyan = Maya + Potensial Vergi (itki)
+                    $potentialTaxLoss = ($originalPrice * $currentTaxRate / 100) * $qtyNeeded;
                     $itemCostForReport = $productTotalCost + $potentialTaxLoss;
 
                 } else {
-                    // --- NORMAL SATIŞ ---
+                    // Normal Satış
                     $price = $originalPrice;
 
+                    // Endirim Hesabı
                     if ($product->activeDiscount) {
                         $d = $product->activeDiscount;
                         $discountAmount = ($d->type == 'fixed') ? $d->value : ($price * $d->value / 100);
                     }
 
-                    // Vergi hesabı
-                    $taxableAmount = ($price - $discountAmount) * $qtyNeeded;
-                    $taxAmount = $taxableAmount * ($currentTaxRate / 100);
+                    // Yekun vahid qiyməti (Endirimli)
+                    $finalUnitTestPrice = $price - $discountAmount;
+                    $lineTotal = $finalUnitTestPrice * $qtyNeeded;
 
-                    $lineTotal = ($price * $qtyNeeded) - ($discountAmount * $qtyNeeded) + $taxAmount;
+                    // --- VERGİ HESABLAMA (POS Məntiqi) ---
+                    // Vergi qiymətə daxildir.
+                    // Məsələn: 118 AZN (18% vergi) => Qiymət 100, Vergi 18.
+                    if ($currentTaxRate > 0) {
+                        $basePriceTotal = $lineTotal / (1 + ($currentTaxRate / 100));
+                        $taxAmount = $lineTotal - $basePriceTotal;
+                    } else {
+                        $taxAmount = 0;
+                    }
 
-                    // Normal satışda xərc = Maya Dəyəri
+                    // Normal satışda xərc sadəcə maya dəyəridir
                     $itemCostForReport = $productTotalCost;
                 }
 
@@ -206,16 +195,16 @@ class PosController extends Controller
                     'product_name' => $product->name,
                     'product_barcode' => $product->barcode,
                     'quantity' => $qtyNeeded,
-                    'is_gift' => $isGift ?? false,
+                    'is_gift' => $isGift,
                     'price' => $price,
                     'cost' => ($qtyNeeded > 0) ? ($productTotalCost / $qtyNeeded) : 0,
-                    'tax_amount' => $taxAmount,
+                    'tax_amount' => $taxAmount, // Hesablanmış vergi
                     'discount_amount' => $discountAmount * $qtyNeeded,
                     'total' => $lineTotal
                 ]);
 
                 // Ümumi Cəmlər
-                $subtotal += ($price * $qtyNeeded);
+                $subtotal += ($originalPrice * $qtyNeeded);
                 $totalDiscount += ($discountAmount * $qtyNeeded);
                 $totalTax += $taxAmount;
                 $grandTotal += $lineTotal;
@@ -228,7 +217,7 @@ class PosController extends Controller
             $order->update([
                 'subtotal' => $subtotal,
                 'total_discount' => $totalDiscount,
-                'total_tax' => $totalTax,
+                'total_tax' => $totalTax, // Vergi cəmi
                 'grand_total' => $grandTotal,
                 'total_cost' => $totalCost,
                 'change_amount' => $paidAmount - $grandTotal
@@ -254,12 +243,8 @@ class PosController extends Controller
         }
     }
 
-    /**
-     * Mağaza Stokundan Silmə Funksiyası (FIFO)
-     */
     private function deductFromStoreStock($product, $qtyNeeded)
     {
-        // 1. Yalnız MAĞAZA ('store') partiyalarını gətir
         $batches = ProductBatch::where('product_id', $product->id)
             ->where('location', 'store')
             ->where('current_quantity', '>', 0)
@@ -271,22 +256,17 @@ class PosController extends Controller
         $remainingQty = $qtyNeeded;
         $totalDeductedCost = 0;
 
-        // Mağazada ümumi stok yoxlanışı
         $totalInStore = $batches->sum('current_quantity');
 
         if ($totalInStore < $qtyNeeded) {
-            throw new \Exception("Mağazada '{$product->name}' məhsulundan kifayət qədər yoxdur! (Tələb: $qtyNeeded, Var: $totalInStore). Zəhmət olmasa Anbardan Transfer edin.");
+            throw new \Exception("Mağazada '{$product->name}' məhsulundan kifayət qədər yoxdur! (Tələb: $qtyNeeded, Var: $totalInStore).");
         }
 
         foreach ($batches as $batch) {
             if ($remainingQty <= 0) break;
-
             $take = min($remainingQty, $batch->current_quantity);
-
             $totalDeductedCost += ($take * $batch->cost_price);
-
             $batch->decrement('current_quantity', $take);
-
             $remainingQty -= $take;
         }
 
