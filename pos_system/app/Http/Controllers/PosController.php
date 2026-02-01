@@ -58,6 +58,17 @@ class PosController extends Controller
             $price = (float) $product->selling_price;
             $discountAmount = 0;
 
+            // --- VERGİ DƏRƏCƏSİNİ batch_code-DAN ÇIXARMAQ ---
+            $taxRate = 0;
+            $firstBatch = $product->batches->first();
+
+            if ($firstBatch && $firstBatch->batch_code) {
+                // Regex: Mötərizə içində rəqəm və % işarəsi axtarır. Məs: (18.00%)
+                if (preg_match('/\((\d+(?:\.\d+)?)%\)/', $firstBatch->batch_code, $matches)) {
+                    $taxRate = (float) $matches[1];
+                }
+            }
+
             if ($product->activeDiscount) {
                 $discount = $product->activeDiscount;
                 if ($discount->type == 'fixed') {
@@ -77,7 +88,7 @@ class PosController extends Controller
                 'price' => $price,
                 'discount_amount' => (float) $discountAmount,
                 'final_price' => (float) $finalPrice,
-                'tax_rate' => (float) ($product->tax_rate ?? 0),
+                'tax_rate' => $taxRate,
                 'stock' => (int) $stock
             ];
         });
@@ -135,57 +146,47 @@ class PosController extends Controller
             foreach ($request->cart as $item) {
                 $product = Product::lockForUpdate()->findOrFail($item['id']);
                 $qtyNeeded = $item['qty'];
-
-                // DÜZƏLİŞ: Hədiyyə dəyərinin düzgün oxunması (String "false" problemi həlli)
                 $isGiftRaw = $item['is_gift'] ?? false;
                 $isGift = filter_var($isGiftRaw, FILTER_VALIDATE_BOOLEAN);
 
-                // Stokdan silmə
-                $deductionResult = $this->deductFromStoreStock($product, $qtyNeeded);
-                $productTotalCost = $deductionResult['total_cost'];
-
-                // Qiymət və Vergi Parametrləri
                 $originalPrice = (float) $product->selling_price;
-                $currentTaxRate = (float) ($product->tax_rate ?? 0);
+
+                // --- STOKDAN ÇIXILMA VƏ MAYA ÜZRƏ VERGİ HESABI ---
+                // Artıq satış qiymətini göndərməyə ehtiyac yoxdur, maya dəyəri stokun özündə var
+                $deductionResult = $this->deductFromStoreStock($product, $qtyNeeded);
+
+                $productTotalCost = $deductionResult['total_cost']; // Ümumi Maya
+                $calculatedTotalTax = $deductionResult['total_tax']; // Maya üzərindən hesablanmış Vergi
 
                 $discountAmount = 0;
-                $taxAmount = 0;
                 $lineTotal = 0;
+                $price = $originalPrice;
 
                 if ($isGift) {
-                    // Hədiyyə: Qiymət 0, Vergi 0
+                    // Hədiyyə
                     $price = 0;
                     $lineTotal = 0;
+                    // Hədiyyə olsa belə, bu malın vergisi şirkət üçün xərcdir (itkidir)
+                    $itemTaxAmount = $calculatedTotalTax;
 
-                    // Hesabatda Ziyan = Maya + Potensial Vergi (itki)
-                    $potentialTaxLoss = ($originalPrice * $currentTaxRate / 100) * $qtyNeeded;
-                    $itemCostForReport = $productTotalCost + $potentialTaxLoss;
+                    // Hesabat Xərci: Maya + Vergi
+                    $itemCostForReport = $productTotalCost + $calculatedTotalTax;
 
                 } else {
                     // Normal Satış
-                    $price = $originalPrice;
-
-                    // Endirim Hesabı
                     if ($product->activeDiscount) {
                         $d = $product->activeDiscount;
                         $discountAmount = ($d->type == 'fixed') ? $d->value : ($price * $d->value / 100);
                     }
 
-                    // Yekun vahid qiyməti (Endirimli)
+                    // Yekun qiymət (Müştərinin ödədiyi)
                     $finalUnitTestPrice = $price - $discountAmount;
                     $lineTotal = $finalUnitTestPrice * $qtyNeeded;
 
-                    // --- VERGİ HESABLAMA (POS Məntiqi) ---
-                    // Vergi qiymətə daxildir.
-                    // Məsələn: 118 AZN (18% vergi) => Qiymət 100, Vergi 18.
-                    if ($currentTaxRate > 0) {
-                        $basePriceTotal = $lineTotal / (1 + ($currentTaxRate / 100));
-                        $taxAmount = $lineTotal - $basePriceTotal;
-                    } else {
-                        $taxAmount = 0;
-                    }
+                    // Vergi (Maya dəyərindən hesablanmış)
+                    $itemTaxAmount = $calculatedTotalTax;
 
-                    // Normal satışda xərc sadəcə maya dəyəridir
+                    // Normal satışda xərc = Maya Dəyəri
                     $itemCostForReport = $productTotalCost;
                 }
 
@@ -198,15 +199,14 @@ class PosController extends Controller
                     'is_gift' => $isGift,
                     'price' => $price,
                     'cost' => ($qtyNeeded > 0) ? ($productTotalCost / $qtyNeeded) : 0,
-                    'tax_amount' => $taxAmount, // Hesablanmış vergi
+                    'tax_amount' => $itemTaxAmount,
                     'discount_amount' => $discountAmount * $qtyNeeded,
                     'total' => $lineTotal
                 ]);
 
-                // Ümumi Cəmlər
                 $subtotal += ($originalPrice * $qtyNeeded);
                 $totalDiscount += ($discountAmount * $qtyNeeded);
-                $totalTax += $taxAmount;
+                $totalTax += $itemTaxAmount;
                 $grandTotal += $lineTotal;
 
                 $totalCost += $itemCostForReport;
@@ -217,7 +217,7 @@ class PosController extends Controller
             $order->update([
                 'subtotal' => $subtotal,
                 'total_discount' => $totalDiscount,
-                'total_tax' => $totalTax, // Vergi cəmi
+                'total_tax' => $totalTax,
                 'grand_total' => $grandTotal,
                 'total_cost' => $totalCost,
                 'change_amount' => $paidAmount - $grandTotal
@@ -243,6 +243,9 @@ class PosController extends Controller
         }
     }
 
+    /**
+     * Stokdan silir və Maya Dəyərinə əsasən Vergi hesablayır
+     */
     private function deductFromStoreStock($product, $qtyNeeded)
     {
         $batches = ProductBatch::where('product_id', $product->id)
@@ -255,21 +258,42 @@ class PosController extends Controller
 
         $remainingQty = $qtyNeeded;
         $totalDeductedCost = 0;
+        $totalReferenceTax = 0;
 
         $totalInStore = $batches->sum('current_quantity');
 
         if ($totalInStore < $qtyNeeded) {
-            throw new \Exception("Mağazada '{$product->name}' məhsulundan kifayət qədər yoxdur! (Tələb: $qtyNeeded, Var: $totalInStore).");
+            throw new \Exception("Mağazada '{$product->name}' məhsulundan kifayət qədər yoxdur!");
         }
 
         foreach ($batches as $batch) {
             if ($remainingQty <= 0) break;
+
             $take = min($remainingQty, $batch->current_quantity);
+
+            // 1. Maya Dəyəri
             $totalDeductedCost += ($take * $batch->cost_price);
+
+            // 2. Vergi (batch_code içindən Parse edilir)
+            $batchTaxRate = 0;
+            if (preg_match('/\((\d+(?:\.\d+)?)%\)/', $batch->batch_code, $matches)) {
+                $batchTaxRate = (float) $matches[1];
+            }
+
+            if ($batchTaxRate > 0) {
+                // DÜZƏLİŞ: Vergi MAYA DƏYƏRİNİN faizi kimi hesablanır
+                // Vergi = (Maya * Faiz) / 100
+                $chunkTax = ($batch->cost_price * ($batchTaxRate / 100)) * $take;
+                $totalReferenceTax += $chunkTax;
+            }
+
             $batch->decrement('current_quantity', $take);
             $remainingQty -= $take;
         }
 
-        return ['total_cost' => $totalDeductedCost];
+        return [
+            'total_cost' => $totalDeductedCost,
+            'total_tax' => $totalReferenceTax
+        ];
     }
 }
