@@ -3,7 +3,6 @@
 ![Laravel](https://img.shields.io/badge/Laravel-11.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.2+-777BB4?style=for-the-badge&logo=php&logoColor=white)
 ![Bootstrap](https://img.shields.io/badge/Bootstrap-5-563D7C?style=for-the-badge&logo=bootstrap&logoColor=white)
-![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)
 
 **Update Server** is a centralized management system designed for POS systems, desktop software, and web applications. It facilitates **Over-the-Air (OTA) updates**, real-time notifications, and remote resource management (images, icons, translations) through a secure RESTful API.
 
@@ -107,14 +106,6 @@ Follow these steps to deploy the server:
 
 ---
 
-# 🚀 Update Server & Admin Panel
-
-![Laravel](https://img.shields.io/badge/Laravel-12.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
-![System](https://img.shields.io/badge/System-Update%20%26%20Plugins-blue?style=for-the-badge)
-
-**Update Server** is a centralized management system designed for POS systems, desktop software, and web applications.
-
----
 
 ## 🌐 Update & Plugins Center (Live Demo)
 
