@@ -107,6 +107,27 @@ Follow these steps to deploy the server:
 
 ---
 
+# 🚀 Update Server & Admin Panel
+
+![Laravel](https://img.shields.io/badge/Laravel-11.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
+![System](https://img.shields.io/badge/System-Update%20%26%20Plugins-blue?style=for-the-badge)
+
+**Update Server** is a centralized management system designed for POS systems, desktop software, and web applications.
+
+---
+
+## 🌐 Update & Plugins Center (Live Demo)
+
+You can access the active system via the link below:
+
+### 👉 **[www.rjpos.ruhidjavadov.site](https://www.rjpos.ruhidjavadov.site/)**
+
+---
+
+## 🌟 Support & Donate
+...
+
+
 ## 📡 API Usage
 
 The system provides a RESTful API for client applications to communicate with the server.
@@ -145,22 +166,3 @@ Developer: Ruhid Javadov
 This project is proprietary software. All rights reserved. Copyright © 2026 Update Server.
 
 
-# 🚀 Update Server & Admin Panel
-
-![Laravel](https://img.shields.io/badge/Laravel-11.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
-![System](https://img.shields.io/badge/System-Update%20%26%20Plugins-blue?style=for-the-badge)
-
-**Update Server** is a centralized management system designed for POS systems, desktop software, and web applications.
-
----
-
-## 🌐 Update & Plugins Center (Live Demo)
-
-You can access the active system via the link below:
-
-### 👉 **[www.rjpos.ruhidjavadov.site](https://www.rjpos.ruhidjavadov.site/)**
-
----
-
-## 🌟 Support & Donate
-...
