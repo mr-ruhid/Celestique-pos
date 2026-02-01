@@ -109,7 +109,7 @@ Follow these steps to deploy the server:
 
 # 🚀 Update Server & Admin Panel
 
-![Laravel](https://img.shields.io/badge/Laravel-11.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
+![Laravel](https://img.shields.io/badge/Laravel-12.x-FF2D20?style=for-the-badge&logo=laravel&logoColor=white)
 ![System](https://img.shields.io/badge/System-Update%20%26%20Plugins-blue?style=for-the-badge)
 
 **Update Server** is a centralized management system designed for POS systems, desktop software, and web applications.
